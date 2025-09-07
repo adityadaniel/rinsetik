@@ -144,7 +144,3 @@ rinsetik/
 - All metadata is stripped from remixed videos for privacy
 - Each remix includes a JSON file documenting the applied parameters
 - Processing time depends on video length and selected transformations
-
-## License
-
-This project is for educational purposes only. Please respect copyright laws and terms of service when downloading and processing videos.

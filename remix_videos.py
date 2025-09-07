@@ -8,6 +8,7 @@ from pathlib import Path
 import shutil
 from datetime import datetime
 import argparse
+import tempfile
 
 class VideoRemixer:
     def __init__(self, input_dir="downloads", output_dir="remixed"):
@@ -16,7 +17,7 @@ class VideoRemixer:
         self.output_dir.mkdir(exist_ok=True)
         
     def get_random_parameters(self):
-        """Generate random parameters similar to RinseTok"""
+        """Generate random parameters"""
         params = {
             # Basic Adjustments
             "zoom_factor": round(random.uniform(1.02, 1.08), 2),
@@ -116,6 +117,31 @@ class VideoRemixer:
         
         return ",".join(audio_filters) if audio_filters else None
     
+    def get_exif_data(self, video_path):
+        """Extract all EXIF metadata from video"""
+        try:
+            cmd = [
+                "exiftool",
+                "-j",  # JSON output
+                "-a",  # Allow duplicate tags
+                "-G",  # Show group names
+                str(video_path)
+            ]
+            
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            if result.returncode == 0:
+                metadata = json.loads(result.stdout)[0] if result.stdout else {}
+                # Remove file system metadata that changes naturally
+                keys_to_remove = ['SourceFile', 'FileName', 'Directory', 'FileModifyDate', 
+                                 'FileAccessDate', 'FileInodeChangeDate', 'FilePermissions']
+                for key in keys_to_remove:
+                    metadata.pop(key, None)
+                return metadata
+            return {}
+        except Exception as e:
+            print(f"  ⚠ Could not extract EXIF data: {str(e)}")
+            return {}
+    
     def strip_metadata(self, video_path):
         """Strip all metadata from video using exiftool"""
         try:
@@ -138,6 +164,44 @@ class VideoRemixer:
             print(f"  ⚠ Warning: exiftool not available or error: {str(e)}")
             return False
     
+    def compare_metadata(self, original_meta, remixed_meta):
+        """Compare metadata and return differences"""
+        diff = {
+            'removed': {},
+            'modified': {},
+            'added': {},
+            'summary': {
+                'original_keys': len(original_meta),
+                'remixed_keys': len(remixed_meta),
+                'removed_count': 0,
+                'modified_count': 0,
+                'added_count': 0
+            }
+        }
+        
+        # Find removed keys
+        for key in original_meta:
+            if key not in remixed_meta:
+                diff['removed'][key] = original_meta[key]
+                diff['summary']['removed_count'] += 1
+        
+        # Find modified keys
+        for key in original_meta:
+            if key in remixed_meta and original_meta[key] != remixed_meta[key]:
+                diff['modified'][key] = {
+                    'original': original_meta[key],
+                    'remixed': remixed_meta[key]
+                }
+                diff['summary']['modified_count'] += 1
+        
+        # Find added keys
+        for key in remixed_meta:
+            if key not in original_meta:
+                diff['added'][key] = remixed_meta[key]
+                diff['summary']['added_count'] += 1
+        
+        return diff
+    
     def process_video(self, input_path, params=None):
         """Process a single video with FFmpeg and strip metadata"""
         if params is None:
@@ -148,6 +212,10 @@ class VideoRemixer:
         random_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=6))
         output_filename = f"remix_{timestamp}_{random_suffix}.mp4"
         output_path = self.output_dir / output_filename
+        
+        # Capture original EXIF data before processing
+        print(f"\nCapturing original metadata...")
+        original_exif = self.get_exif_data(input_file)
         
         # Build FFmpeg command with metadata stripping options
         cmd = ["ffmpeg", "-i", str(input_file), "-y"]
@@ -213,13 +281,54 @@ class VideoRemixer:
             if result.returncode == 0:
                 print(f"✓ Successfully processed: {output_filename}")
                 
+                # Get EXIF data after initial FFmpeg processing
+                intermediate_exif = self.get_exif_data(output_path)
+                
                 # Strip metadata with exiftool as a second pass
                 self.strip_metadata(output_path)
                 
-                # Save parameters to JSON for reference
-                params_file = self.output_dir / f"{output_filename}.json"
-                with open(params_file, 'w') as f:
-                    json.dump(params, f, indent=2)
+                # Get final EXIF data after stripping
+                print(f"  Capturing remixed metadata...")
+                final_exif = self.get_exif_data(output_path)
+                
+                # Compare metadata
+                metadata_diff = self.compare_metadata(original_exif, final_exif)
+                
+                # Create comprehensive metadata report
+                metadata_report = {
+                    'original_exif': original_exif,
+                    'intermediate_exif': intermediate_exif,  # After FFmpeg
+                    'final_exif': final_exif,  # After exiftool stripping
+                    'differences': metadata_diff,
+                    'processing_params': params,
+                    'files': {
+                        'input': str(input_file),
+                        'output': str(output_path)
+                    },
+                    'timestamp': datetime.now().isoformat()
+                }
+                
+                # Save comprehensive metadata report
+                report_file = self.output_dir / f"{output_filename}_metadata_report.json"
+                with open(report_file, 'w') as f:
+                    json.dump(metadata_report, f, indent=2)
+                
+                # Print summary
+                print(f"\n  Metadata Summary:")
+                print(f"    Original metadata fields: {metadata_diff['summary']['original_keys']}")
+                print(f"    Final metadata fields: {metadata_diff['summary']['remixed_keys']}")
+                print(f"    Removed fields: {metadata_diff['summary']['removed_count']}")
+                print(f"    Modified fields: {metadata_diff['summary']['modified_count']}")
+                print(f"    Added fields: {metadata_diff['summary']['added_count']}")
+                
+                if metadata_diff['removed']:
+                    print(f"\n  Key metadata removed:")
+                    for key in list(metadata_diff['removed'].keys())[:10]:  # Show first 10
+                        print(f"    - {key}: {metadata_diff['removed'][key]}")
+                    if len(metadata_diff['removed']) > 10:
+                        print(f"    ... and {len(metadata_diff['removed']) - 10} more fields")
+                
+                print(f"\n  ✓ Metadata report saved: {report_file.name}")
                 
                 return True, output_path
             else:
@@ -266,7 +375,7 @@ def main():
         description='Remix TikTok videos by applying random transformations',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-This script applies random transformations to videos similar to RinseTok:
+This script applies random transformations to videos:
 - Adjusts zoom, playback speed, colors, and audio
 - Adds noise, sharpness, and other effects
 - Modifies encoding parameters
