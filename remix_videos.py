@@ -11,10 +11,11 @@ import argparse
 import tempfile
 
 class VideoRemixer:
-    def __init__(self, input_dir="downloads", output_dir="remixed"):
+    def __init__(self, input_dir="downloads", output_dir="remixed", remove_audio=False):
         self.input_dir = Path(input_dir)
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(exist_ok=True)
+        self.remove_audio = remove_audio
         
     def get_random_parameters(self):
         """Generate random parameters"""
@@ -43,7 +44,7 @@ class VideoRemixer:
             "time_shift": round(random.uniform(-5, 5), 1),
             
             # Additional transformations
-            "remove_audio": False,  # Keep audio by default
+            "remove_audio": self.remove_audio,  # Use class setting
             "flip_horizontal": random.choice([True, False]) if random.random() < 0.1 else False,
             "add_padding": random.choice([2, 4, 6, 8]) if random.random() < 0.3 else 0,
         }
@@ -387,6 +388,8 @@ Examples:
   python remix_videos.py -i downloads -o remixed_videos
   python remix_videos.py --single video.mp4
   python remix_videos.py --show-params
+  python remix_videos.py --remove-audio
+  python remix_videos.py --single video.mp4 --remove-audio
         """
     )
     
@@ -398,10 +401,12 @@ Examples:
                         help='Process a single video file')
     parser.add_argument('--show-params', action='store_true',
                         help='Show random parameters without processing')
+    parser.add_argument('--remove-audio', action='store_true',
+                        help='Remove audio from all processed videos')
     
     args = parser.parse_args()
     
-    remixer = VideoRemixer(args.input, args.output)
+    remixer = VideoRemixer(args.input, args.output, args.remove_audio)
     
     if args.show_params:
         params = remixer.get_random_parameters()
