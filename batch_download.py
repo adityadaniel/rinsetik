@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.13"
+# dependencies = [
+#     "yt-dlp",
+# ]
+# ///
 import os
 import sys
 import argparse

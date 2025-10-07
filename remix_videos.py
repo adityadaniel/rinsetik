@@ -19,6 +19,16 @@ class VideoRemixer:
         
     def get_random_parameters(self):
         """Generate random parameters"""
+        # iPhone models from 12 to 17 series
+        iphone_models = [
+            "iPhone 12", "iPhone 12 mini", "iPhone 12 Pro", "iPhone 12 Pro Max",
+            "iPhone 13", "iPhone 13 mini", "iPhone 13 Pro", "iPhone 13 Pro Max",
+            "iPhone 14", "iPhone 14 Pro", "iPhone 14 Pro Max",
+            "iPhone 15", "iPhone 15 Pro", "iPhone 15 Pro Max",
+            "iPhone 16", "iPhone 16 Pro", "iPhone 16 Pro Max",
+            "iPhone 17", "iPhone 17 Pro", "iPhone 17 Pro Max"
+        ]
+
         params = {
             # Basic Adjustments
             "zoom_factor": round(random.uniform(1.02, 1.08), 2),
@@ -27,26 +37,29 @@ class VideoRemixer:
             "brightness": round(random.uniform(-0.08, 0.08), 2),
             "contrast": round(random.uniform(0.92, 1.08), 2),
             "volume": round(random.uniform(0.92, 1.08), 2),
-            
+
             # Algorithm Fingerprint - Color Adjustments
             "hue_shift": round(random.uniform(-5, 5), 1),
             "gamma": round(random.uniform(0.95, 1.05), 2),
             "temperature": round(random.uniform(0.95, 1.05), 2),
-            
+
             # Pixel Adjustments
             "noise": round(random.uniform(0, 0.02), 2),
             "sharpness": round(random.uniform(0.95, 1.05), 2),
             "blend": round(random.uniform(0, 0.01), 2),
-            
+
             # Encoding Adjustments
             "bitrate_variation": round(random.uniform(0.95, 1.05), 2),
             "frame_blending": round(random.uniform(0, 0.25), 2),
             "time_shift": round(random.uniform(-5, 5), 1),
-            
+
             # Additional transformations
             "remove_audio": self.remove_audio,  # Use class setting
             "flip_horizontal": random.choice([True, False]) if random.random() < 0.1 else False,
             "add_padding": random.choice([2, 4, 6, 8]) if random.random() < 0.3 else 0,
+
+            # Fake iPhone metadata
+            "iphone_model": random.choice(iphone_models),
         }
         return params
     
@@ -143,23 +156,38 @@ class VideoRemixer:
             print(f"  ⚠ Could not extract EXIF data: {str(e)}")
             return {}
     
-    def strip_metadata(self, video_path):
-        """Strip all metadata from video using exiftool"""
+    def add_fake_metadata(self, video_path, params):
+        """Add fake iPhone metadata to video using exiftool"""
         try:
-            # First, remove all metadata with exiftool
+            # Randomize iPhone creation time and date original
+            random_dt = datetime.fromtimestamp(random.randint(1609459200, 1767225599))  # 2021-01-01 to 2025-12-31
+            iphone_creation_time = random_dt.strftime("%Y:%m:%d %H:%M:%S+00:00Z")
+            iphone_date_original = random_dt.strftime("%Y:%m:%d %H:%M:%S")
+            if params['iphone_model'].contains('iPhone 17'):
+                iphone_software = "iOS 26.0.0"
+            else:
+                iphone_software = ["iOS 18.6.1", "iOS 18.4.1", "iOS 18.5"].random()
+
             exif_cmd = [
                 "exiftool",
-                "-all=",
                 "-overwrite_original",
+                f"-CreationTime={iphone_creation_time}",
+                f"-DateTimeOriginal={iphone_date_original}",
+                f"-CreateDate={iphone_creation_time}",
+                "-Make=Apple",
+                f"-Model={params['iphone_model']}",
+                f"-Software={iphone_software}",
+                "-Encoder=Lavf61.7.100",
+                "-HandlerType=Metadata Tags",
                 str(video_path)
             ]
-            
+
             result = subprocess.run(exif_cmd, capture_output=True, text=True)
             if result.returncode == 0:
-                print(f"  ✓ Metadata stripped with exiftool")
+                print(f"  ✓ Fake iPhone metadata added with exiftool")
                 return True
             else:
-                print(f"  ⚠ Warning: Could not strip metadata with exiftool: {result.stderr}")
+                print(f"  ⚠ Warning: Could not add metadata with exiftool: {result.stderr}")
                 return False
         except Exception as e:
             print(f"  ⚠ Warning: exiftool not available or error: {str(e)}")
@@ -218,15 +246,21 @@ class VideoRemixer:
         print(f"\nCapturing original metadata...")
         original_exif = self.get_exif_data(input_file)
         
-        # Build FFmpeg command with metadata stripping options
+        # Build FFmpeg command with fake iPhone metadata
         cmd = ["ffmpeg", "-i", str(input_file), "-y"]
-        
-        # Add metadata stripping options for FFmpeg
+
+        # Add fake iPhone metadata
+        iphone_creation_time = "2025:09:30 22:48:55+00:00Z"
+        iphone_date_original = "2025:09:30 22:48:55"
+
         cmd.extend([
-            "-map_metadata", "-1",  # Strip all metadata
-            "-fflags", "+bitexact",  # Make output deterministic
-            "-flags:v", "+bitexact",
-            "-flags:a", "+bitexact",
+            "-metadata", f"creation_time={iphone_creation_time}",
+            "-metadata", f"date={iphone_date_original}",
+            "-metadata", "make=Apple",
+            "-metadata", f"model={params['iphone_model']}",
+            "-metadata", "software=iOS 18.2.1",
+            "-metadata", "encoder=Lavf61.7.100",
+            "-metadata", "handler_type=Metadata Tags",
         ])
         
         # Add video filters
@@ -257,16 +291,6 @@ class VideoRemixer:
             "-c:a", "aac",
             "-b:a", "128k",
             "-movflags", "+faststart",
-            # Additional metadata stripping
-            "-metadata", "title=",
-            "-metadata", "author=",
-            "-metadata", "comment=",
-            "-metadata", "description=",
-            "-metadata", "synopsis=",
-            "-metadata", "show=",
-            "-metadata", "episode_id=",
-            "-metadata", "network=",
-            "-metadata", "company=",
             str(output_path)
         ])
         
@@ -276,7 +300,13 @@ class VideoRemixer:
         for key, value in params.items():
             if value != 1.0 and value != 0 and value is not False:
                 print(f"  {key}: {value}")
-        
+
+        print(f"\nFake iPhone metadata to be added:")
+        print(f"  Make: Apple")
+        print(f"  Model: {params['iphone_model']}")
+        print(f"  Software: iOS 18.2.1")
+        print(f"  Creation Time: 2025:09:30 22:48:55+00:00Z")
+
         try:
             result = subprocess.run(cmd, capture_output=True, text=True)
             if result.returncode == 0:
@@ -284,11 +314,11 @@ class VideoRemixer:
                 
                 # Get EXIF data after initial FFmpeg processing
                 intermediate_exif = self.get_exif_data(output_path)
-                
-                # Strip metadata with exiftool as a second pass
-                self.strip_metadata(output_path)
-                
-                # Get final EXIF data after stripping
+
+                # Add fake iPhone metadata with exiftool as a second pass
+                self.add_fake_metadata(output_path, params)
+
+                # Get final EXIF data after adding metadata
                 print(f"  Capturing remixed metadata...")
                 final_exif = self.get_exif_data(output_path)
                 
@@ -321,13 +351,13 @@ class VideoRemixer:
                 print(f"    Removed fields: {metadata_diff['summary']['removed_count']}")
                 print(f"    Modified fields: {metadata_diff['summary']['modified_count']}")
                 print(f"    Added fields: {metadata_diff['summary']['added_count']}")
-                
-                if metadata_diff['removed']:
-                    print(f"\n  Key metadata removed:")
-                    for key in list(metadata_diff['removed'].keys())[:10]:  # Show first 10
-                        print(f"    - {key}: {metadata_diff['removed'][key]}")
-                    if len(metadata_diff['removed']) > 10:
-                        print(f"    ... and {len(metadata_diff['removed']) - 10} more fields")
+
+                if metadata_diff['added']:
+                    print(f"\n  Key fake iPhone metadata added:")
+                    for key in list(metadata_diff['added'].keys())[:10]:  # Show first 10
+                        print(f"    + {key}: {metadata_diff['added'][key]}")
+                    if len(metadata_diff['added']) > 10:
+                        print(f"    ... and {len(metadata_diff['added']) - 10} more fields")
                 
                 print(f"\n  ✓ Metadata report saved: {report_file.name}")
                 
@@ -380,8 +410,8 @@ This script applies random transformations to videos:
 - Adjusts zoom, playback speed, colors, and audio
 - Adds noise, sharpness, and other effects
 - Modifies encoding parameters
-- STRIPS ALL METADATA using FFmpeg and exiftool
-- Saves remixed videos with completely clean metadata
+- ADDS FAKE IPHONE METADATA using FFmpeg and exiftool
+- Saves remixed videos with authentic-looking iPhone metadata
 
 Examples:
   python remix_videos.py
